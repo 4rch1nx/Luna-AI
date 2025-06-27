@@ -23,14 +23,25 @@ if os.path.exists(MEMORY_FILE):
             MEMORY = {
                 "conversation_history": [],
                 "user_info": {},
-                "luna_notes": []
+                "luna_notes": [],
+                "knowledge": ""
             }
 else:
     MEMORY = {
         "conversation_history": [],
         "user_info": {},
-        "luna_notes": []
+        "luna_notes": [],
+        "knowledge": ""
     }
+
+# Load knowledge file (from PDF or TXT)
+KNOWLEDGE_FILE = "user_knowledge.txt"
+try:
+    with open(KNOWLEDGE_FILE, "r", encoding="utf-8") as kf:
+        MEMORY["knowledge"] = kf.read()
+except FileNotFoundError:
+    pass
+
 
 def save_memory():
     """Save current memory to file"""
@@ -76,12 +87,16 @@ def luna_response(user_input):
     # Try to extract facts
     extract_user_info(user_input)
 
-    # Build full prompt with history + user info
+    # Build full prompt with history + user info + knowledge
     history_str = "\n".join(MEMORY["conversation_history"])
     user_info_str = "\n".join([f"{k}: {v}" for k, v in MEMORY["user_info"].items()])
     luna_notes_str = "\n".join(MEMORY["luna_notes"])
+    knowledge_str = MEMORY["knowledge"]
 
     full_prompt = f"""{SYSTEM_PROMPT}
+
+Additional Knowledge:
+{knowledge_str}
 
 User Info:
 {user_info_str}
@@ -98,7 +113,7 @@ Now respond to:"""
         response = requests.post(
             'http://localhost:11434/api/generate',
             json={
-                "model": "llama3.2",
+                "model": "llama3:8b-instruct",
                 "prompt": full_prompt,
                 "stream": False
             }
