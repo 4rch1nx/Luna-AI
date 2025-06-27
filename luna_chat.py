@@ -113,7 +113,7 @@ Now respond to:"""
         response = requests.post(
             'http://localhost:11434/api/generate',
             json={
-                "model": "llama3:8b-instruct",
+                "model": "llama3.2",
                 "prompt": full_prompt,
                 "stream": False
             }
