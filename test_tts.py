@@ -1,9 +1,8 @@
-# luna_vtuber.py
+# test_tts.py
 import requests
 import subprocess
 import os
 
-# Step 1: Ask Ollama for response (non-streaming)
 def get_ai_response(prompt):
     response = requests.post(
         "http://localhost:11434/api/generate",
@@ -15,23 +14,41 @@ def get_ai_response(prompt):
     )
     return response.json()["response"]
 
-# Step 2: Use Piper to speak the text
-def speak_text(text):
-    # Save speech to audio file
-    with open("output.wav", "wb") as f:
-        subprocess.run(
-            ["piper", "--model", "en_US-amy-medium"],
-            input=text.encode(),
-            stdout=f
-        )
-    
-    # Play audio (VTube Studio will detect it)
-    print("🎤 Playing audio...")
-    subprocess.run(["afplay", "output.wav"])  # macOS
-    # On Linux: ["aplay", "output.wav"]
-    # On Windows: ["powershell", "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).SpeakFile('output.wav')"]
+def speak_text(text, speed=1.0):
+    """
+    Speak text with adjustable speed
+    speed = 1.0 → normal
+    speed > 1.0 → slower (e.g., 1.3 = 30% slower)
+    speed < 1.0 → faster (e.g., 0.8 = 20% faster)
+    """
+    print(f"🔊 Luna speaking ({'faster' if speed < 1 else 'slower' if speed > 1 else 'normally'})...")
 
-# Step 3: Main loop
+    model_path = "tts/piper/models/en_US-amy-medium.onnx"
+    config_path = "tts/piper/models/en_US-amy-medium.onnx.json"
+
+    length_scale = 1.0 / speed
+
+    with open("output.wav", "wb") as wav_file:
+        result = subprocess.run(
+            [
+                "piper",
+                "--model", model_path,
+                "--config", config_path,
+                "--output_file", "-",
+                "--length-scale", str(length_scale)   # ← Control speed here!
+            ],
+            input=text.encode(),
+            stdout=wav_file,
+            stderr=subprocess.PIPE
+        )
+
+    if result.returncode != 0:
+        print("❌ Piper error:", result.stderr.decode())
+        return
+
+    print("🎤 Playing audio...")
+    subprocess.run(["afplay", "output.wav"])
+
 if __name__ == "__main__":
     print("🎙️ Luna AI VTuber is ready! Type 'quit' to exit.\n")
     
@@ -40,9 +57,7 @@ if __name__ == "__main__":
         if user_input.lower() in ["quit", "exit"]:
             break
 
-        # Get AI response
         ai_text = get_ai_response(f"Respond naturally as a friendly AI named Luna: {user_input}")
         print("Luna:", ai_text)
 
-        # Speak it → triggers VTube Studio lip sync
-        speak_text(ai_text)
+        speak_text(ai_text, speed=1.3)

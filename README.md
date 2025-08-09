@@ -21,3 +21,7 @@ python3
 
 `tokens_per_sec.py`:
 Run, select model and the script will show you the tokens, gen time and tokens per second to understand the processing power of you GPU.
+
+## TTS
+To test TTS, you can run `afplay test.wav`
+
