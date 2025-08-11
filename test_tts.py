@@ -21,7 +21,7 @@ def speak_text(text, speed=1.0):
     speed > 1.0 → slower (e.g., 1.3 = 30% slower)
     speed < 1.0 → faster (e.g., 0.8 = 20% faster)
     """
-    print(f"🔊 Luna speaking ({'faster' if speed < 1 else 'slower' if speed > 1 else 'normally'})...")
+    print(f"Luna speaking ({'faster' if speed < 1 else 'slower' if speed > 1 else 'normally'})...")
 
     model_path = "tts/piper/models/en_US-amy-medium.onnx"
     config_path = "tts/piper/models/en_US-amy-medium.onnx.json"
@@ -43,21 +43,21 @@ def speak_text(text, speed=1.0):
         )
 
     if result.returncode != 0:
-        print("❌ Piper error:", result.stderr.decode())
+        print("Piper error:", result.stderr.decode())
         return
 
-    print("🎤 Playing audio...")
+    print("Playing audio...")
     subprocess.run(["afplay", "output.wav"])
 
 if __name__ == "__main__":
-    print("🎙️ Luna AI VTuber is ready! Type 'quit' to exit.\n")
+    print("AI is ready! Type 'quit' to exit.\n")
     
     while True:
         user_input = input("You: ")
         if user_input.lower() in ["quit", "exit"]:
             break
 
-        ai_text = get_ai_response(f"Respond naturally as a friendly AI named Luna: {user_input}")
-        print("Luna:", ai_text)
+        ai_text = get_ai_response(user_input)
+        print("AI:", ai_text)
 
         speak_text(ai_text, speed=1.3)
