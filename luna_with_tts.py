@@ -2,65 +2,87 @@ import requests
 import json
 import os
 from datetime import datetime
+import time
 import random
 from difflib import SequenceMatcher
 import subprocess
+import re
+import argparse
 
-# Terminal color codes
-COLOR_USER = "\033[96m"     # Cyan
-COLOR_LUNA = "\033[92m"     # Green
-COLOR_RESET = "\033[0m"      # Reset
-COLOR_RED = "\033[31m"
+from settings import *
 
-# Model name (update this if you switch models)
-MODEL_NAME = "llama3:8b"
 
-# TTS_Settings = {
-TTS_ENABLED = True
-TTS_SPEED = 1.3  # 1.3 = 30% slower (more dramatic), 1.0 = normal, 0.8 = faster
-PIPER_MODEL_PATH = "tts/piper/models/en_US-amy-medium.onnx"
-PIPER_CONFIG_PATH = "tts/piper/models/en_US-amy-medium.onnx.json"
-AUDIO_OUTPUT_FILE = "output.wav"
+def startup():
+    print("Starting up")
 
-# Load system prompt once at startup
-try:
-    with open("luna_prompt.txt", "r", encoding="utf-8") as f:
-        SYSTEM_PROMPT = f.read()
-except FileNotFoundError:
-    print("Error: 'luna_prompt.txt' not found!")
-    exit(1)
+    print(f"Loading Luna prompt from {COLOR_USER}'{LUNA_PROMPT_FILE}'{COLOR_RESET}...")
+    global SYSTEM_PROMPT
+    try:
+        with open(LUNA_PROMPT_FILE, "r", encoding="utf-8") as f:
+            SYSTEM_PROMPT = f.read()
+        print(f"{COLOR_LUNA}Luna prompt loaded.{COLOR_RESET}")
+    except FileNotFoundError:
+        print(f"{COLOR_RED}Error: {COLOR_USER}'{LUNA_PROMPT_FILE}'{COLOR_RESET} not found!\nExiting{COLOR_RESET}")
+        exit(1)
 
-# Memory file path
-MEMORY_FILE = "memory.json"
+    print()
 
-# Load or create memory
-if os.path.exists(MEMORY_FILE):
-    with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-        try:
-            MEMORY = json.load(f)
-        except json.JSONDecodeError:
-            print("Memory file is corrupt. Starting fresh.")
-            MEMORY = {
-                "conversation_history": [],
-                "user_info": {},
-                "luna_notes": [],
-                "knowledge": ""
-            }
-else:
-    MEMORY = {
-        "conversation_history": [],
-        "user_info": {},
-        "luna_notes": [],
-        "knowledge": ""
-    }
+    global MEMORY
+    print(f"Loading Luna's short memory from {COLOR_USER}'{MEMORY_FILE}'{COLOR_RESET}...")
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            try:
+                MEMORY = json.load(f)
+            except json.JSONDecodeError:
+                print(f"{COLOR_RED}Short memory file is corrupt. Starting fresh.{COLOR_RESET}")
+                MEMORY = {
+                    "conversation_history": [],
+                    "user_info": {},
+                    "luna_notes": [],
+                    "knowledge": ""
+                }
+    else:
+        print(f"{COLOR_YELLOW}No short memory. Starting fresh.{COLOR_RESET}")
+        MEMORY = {
+            "conversation_history": [],
+            "user_info": {},
+            "luna_notes": [],
+            "knowledge": ""
+        }
 
-# Load knowledge file (from PDF or TXT)
-KNOWLEDGE_FILE = "user_knowledge.txt"
-try:
-    with open(KNOWLEDGE_FILE, "r", encoding="utf-8") as kf:
-        MEMORY["knowledge"] = kf.read()
-except FileNotFoundError:
-    pass
+    print(f"{COLOR_LUNA}Luna's short memory loaded.{COLOR_RESET}")
+
+    print()
+
+    print(f"Loading custom knowledge from {COLOR_USER}'{KNOWLEDGE_FILE}'{COLOR_RESET}...")
+    try:
+        with open(KNOWLEDGE_FILE, "r", encoding="utf-8") as kf:
+            MEMORY["knowledge"] = kf.read()
+        print(f"{COLOR_LUNA}Custom knowledge loaded.{COLOR_RESET}")
+    except FileNotFoundError:
+        print(f"{COLOR_YELLOW}No custom knowledge loaded. Skipping...{COLOR_RESET}")
+
+    print()
+
+    print("Validating TTS...")
+    validate_tts_paths()
+    print()
+
+    print(f"Using AI model: {COLOR_PURPLE}{MODEL_NAME}{COLOR_RESET}")
+    print(f"Filter: {COLOR_BLUE}built-in{COLOR_RESET}")
+    print()
+    print(f"TTS: {COLOR_LUNA}Enabled{COLOR_RESET}" if TTS_ENABLED == True else f"TTS: {COLOR_RED}Disabled{COLOR_RESET}")
+    print(f"TTS speed: {TTS_SPEED}")
+    print(f"TTS voice: {COLOR_PURPLE}{TTS_VOICE}{COLOR_RESET}")
+    print()
+    print(f"Commands: '{COLOR_USER}exit{COLOR_RESET}' or '{COLOR_USER}quit{COLOR_RESET}' to end the conversation, '{COLOR_USER}tts on{COLOR_RESET}' or '{COLOR_USER}tts off{COLOR_RESET}' to control voice output.")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--no-tts", action="store_true", help="Disable TTS")
+    parser.add_argument("--model", type=str, default=MODEL_NAME, help="Model name")
+    return parser.parse_args()
 
 
 def save_memory():
@@ -69,45 +91,36 @@ def save_memory():
         json.dump(MEMORY, f, indent=2)
 
 
-def extract_user_info(user_input):
-    """Try to extract basic user info from input"""
-    lower = user_input.lower()
+def update_long_memory():
+    if len(MEMORY["conversation_history"]) > 10:
+        summary = summarize_conversation(MEMORY["conversation_history"])
+        with open(LONG_MEMORY_FILE, "w") as f:
+            json.dump({"summary": summary}, f)
 
-    if "my name is " in lower:
-        name = lower.split("my name is ")[1].split(".")[0].strip().capitalize()
+
+def extract_user_info(user_input):
+    lower = user_input.lower().strip()
+
+    if match := re.search(r"my name is ([\w\s]+)", lower):
+        name = match.group(1).strip().split('.')[0].capitalize()
         MEMORY["user_info"]["name"] = name
         MEMORY["luna_notes"].append(f"User's name is {name}. Annoying, but easy to remember.")
 
-    elif "i like " in lower:
-        like = lower.split("i like ")[1].split(".")[0].strip()
+    elif match := re.search(r"i (?:like|love) ([\w\s]+)", lower):
+        like = match.group(1).strip().split('.')[0]
         MEMORY["user_info"]["likes"] = like
-        MEMORY["luna_notes"].append(f"User likes {like}. Predictable.")
-
-    elif "i love " in lower:
-        love = lower.split("i love ")[1].split(".")[0].strip()
-        MEMORY["user_info"]["likes"] = love
-        MEMORY["luna_notes"].append(f"User loves {love}. How original.")
-
-    elif "i am " in lower or "i'm " in lower:
-        desc = lower.replace("i am ", "").replace("i'm ", "").split(".")[0].strip()
-        MEMORY["user_info"]["description"] = desc
-        MEMORY["luna_notes"].append(f"User describes themselves as '{desc}'. Lame.")
+        MEMORY["luna_notes"].append(f"User {'loves' if 'love' in match.group(0) else 'likes'} {like}. How original.")
 
 
 def log_request_response(prompt, response):
-    """Log the full prompt and AI response to a log file"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_entry = f"""---
-[{timestamp}]
-== PROMPT ==
-{prompt}
+    timestamp = datetime.now()
+    date_str = timestamp.strftime("%Y-%m-%d")
+    log_file = f"logs/{date_str}.log"
 
-== RESPONSE ==
-{response}
-"""
+    os.makedirs("logs", exist_ok=True)
 
-    with open("web_logs.txt", "a", encoding="utf-8") as log_file:
-        log_file.write(log_entry)
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(f"[{timestamp.strftime('%H:%M:%S')}]\n{prompt}\n\n{response}\n---\n\n")
 
 
 def generate_pun(topic):
@@ -130,33 +143,33 @@ def generate_limerick(topic):
     return random.choice(limerick_templates)
 
 
-def remove_repeated_start(reply, threshold=0.4):
-    """Avoid repeating the same opening line"""
+def remove_repeated_start(reply, threshold=0.7):
     lines = reply.strip().split('\n')
-    first_line = lines[0].strip()
+    if not lines:
+        return reply
 
+    first_line = lines[0].strip()
     for msg in MEMORY["conversation_history"]:
         if msg.startswith("Luna:"):
-            old_reply = msg[len("Luna: "):]
+            old_reply = msg[len("Luna: "):].strip().split('\n')[0]
             if SequenceMatcher(None, first_line, old_reply).ratio() > threshold:
-                return '\n'.join(lines[1:]) if len(lines) > 1 else "(Hmm...)"
+                return '\n'.join(lines[1:]) or "(Hmm...)"
+    return reply
 
-    return '\n'.join(lines)
 
-
-def speak_text(text, speed=1.3):
+def speak_text(text, speed=TTS_SPEED):
     """
     Speak text using Piper TTS with adjustable speed
     speed = 1.0 → normal
-    speed > 1.0 → slower (e.g., 1.3 = 30% slower)
-    speed < 1.0 → faster
+    speed > 1.0 → faster (e.g., 1.3 = 30% faster)
+    speed < 1.0 → slower
     """
     if not TTS_ENABLED:
         return
 
     print(f"{COLOR_LUNA}Luna (speaking){COLOR_RESET}: ...")
 
-    length_scale = 1.0 / speed  # Piper uses length_scale: higher = slower
+    length_scale = 1.0 / speed
 
     try:
         with open(AUDIO_OUTPUT_FILE, "wb") as wav_file:
@@ -174,7 +187,7 @@ def speak_text(text, speed=1.3):
             )
 
         if result.returncode != 0:
-            print(f"TTS Error: {result.stderr.decode('utf-8')}")
+            print(f"{COLOR_RED}TTS Error: {COLOR_RESET}{result.stderr.decode('utf-8')}")
             return
 
         # Play audio
@@ -182,19 +195,16 @@ def speak_text(text, speed=1.3):
             subprocess.run(["powershell", "-c", f"(New-Object Media.SoundPlayer '{os.path.abspath(AUDIO_OUTPUT_FILE)}').PlaySync();"], shell=True)
         elif os.path.exists("/usr/bin/afplay"):  # macOS
             subprocess.run(["afplay", AUDIO_OUTPUT_FILE])
-        elif os.path.exists("/usr/bin/aplay"):  # Linux (alsa)
+        elif os.path.exists("/usr/bin/aplay"):  # Linux
             subprocess.run(["aplay", AUDIO_OUTPUT_FILE])
         else:
-            print("No audio player found. Skipping playback.")
+            print(f"{COLOR_YELLOW}No audio player found. Skipping playback.{COLOR_RESET}")
 
     except Exception as e:
-        print(f"Error during TTS: {str(e)}")
+        print(f"{COLOR_RED}Error during TTS:\n{COLOR_RESET}{str(e)}")
 
 
 def luna_response(user_input):
-    global MEMORY
-
-    # Handle TTS toggle commands
     if user_input.lower() == "tts off":
         global TTS_ENABLED
         TTS_ENABLED = False
@@ -225,14 +235,8 @@ def luna_response(user_input):
     custom_content = ""
 
     if "pun" in lower_input or "joke" in lower_input:
-        topic = lower_input.replace("make me a pun about ", "") \
-                          .replace("tell me a pun about ", "") \
-                          .replace("generate a pun about ", "") \
-                          .strip()
-        if not topic:
-            topic = "something"
-        custom_content += f"\n[Custom Pun]\n{generate_pun(topic)}\n"
-
+        match = re.search(r"(?:pun|joke)\s+(?:about|on|for)\s+([^\.\!\?]+)", lower_input)
+        topic = match.group(1).strip() if match else "something"
     elif "limerick" in lower_input:
         topic = lower_input.replace("make me a limerick about ", "") \
                           .replace("tell me a limerick about ", "") \
@@ -257,70 +261,88 @@ def luna_response(user_input):
 
     full_prompt = f"""{SYSTEM_PROMPT}
 
-== Knowledge ==
+<knowledge>
 {knowledge_str}
+</knowledge>
 
-== User Info ==
+<user_info>
 {user_info_str}
+</user_info>
 
-== Notes ==
+<notes>
 {luna_notes_str}
+</notes>
 
-== Previous Messages ==
+<history>
 {history_str}
+</history>
 
-Now respond to:"""
+Respond to the latest message.
+"""
 
-    full_prompt_for_log = full_prompt  # Save for logging
+    full_prompt_for_log = full_prompt
 
-    try:
-        response = requests.post(
-            'http://localhost:11434/api/generate',
-            json={
-                "model": MODEL_NAME,
-                "prompt": full_prompt,
-                "stream": False
-            }
-        )
+    for attempt in range(3):
+        try:
+            response = requests.post(
+                'http://localhost:11434/api/generate',
+                json={
+                    "model": MODEL_NAME,
+                    "prompt": full_prompt,
+                    "stream": AI_STREAM
+                }
+            )
 
-        ai_reply = response.json().get("response", "No response")
+            ai_reply = response.json().get("response", "No response")
 
-        # Avoid repetition
-        ai_reply = remove_repeated_start(ai_reply)
+            # Avoid repetition
+            ai_reply = remove_repeated_start(ai_reply)
 
-        # Log request and response
-        log_request_response(full_prompt_for_log, ai_reply)
+            # Log request and response
+            log_request_response(full_prompt_for_log, ai_reply)
 
-        # Add AI reply to history
-        MEMORY["conversation_history"].append(f"Luna: {ai_reply}")
-        save_memory()
+            # Add AI reply to history
+            MEMORY["conversation_history"].append(f"Luna: {ai_reply}")
+            save_memory()
 
-        return ai_reply
-
-    except Exception as e:
-        error_msg = f"Connection error: {str(e)}"
-        print(error_msg)
-        return error_msg
+            return ai_reply
+        except Exception as e:
+            error_msg = f"Connection error: {str(e)}"
+            print(error_msg)
+            return error_msg
+        else:
+            print(f"{COLOR_RED}Sorry, I couldn't connect to the AI. Is Ollama running?{COLOR_RESET}")
+            return "Someone tell Andrew there is a problem with my AI."
 
 
 def main():
-    print(f"Using model: {MODEL_NAME}")
-    print("Luna is online.")
-    print("Type 'exit' or 'quit' to end the conversation.")
-    print("She's listening closely...\n")
-    print("Use 'tts on' or 'tts off' to control voice output.")
+    args = parse_args()
+    if args.no_tts:
+        TTS_ENABLED = False
+
+    startup()
 
     while True:
         user = input(f"{COLOR_USER}You: {COLOR_RESET}")
+        """
+        if user.lower() == "help":
+            return (
+                "Available commands:\n" 
+                "  - exit / quit: End chat\n"
+                "  - tts on / off: Toggle voice\n"
+                "  - pun about X: Get a pun\n"
+                "  - limerick about X: Get a limerick\n"
+                "  - help: Show this message"
+            )
+        """
         if user.lower() in ["exit", "quit"]:
-            print(f"{COLOR_LUNA}Luna: *vanishes*{COLOR_RESET}")
-            MEMORY["luna_notes"].append("Conversation ended. Finally some peace.")
+            print(f"{COLOR_YELLOW}Stopping...{COLOR_RESET}")
             save_memory()
             break
         reply = luna_response(user)
         print(f"{COLOR_LUNA}Luna: {reply}{COLOR_RESET}")
 
-        speak_text(reply, speed=TTS_SPEED)
+        speak_text(reply)
 
 
 if __name__ == "__main__":
@@ -328,3 +350,5 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print(f"\n{COLOR_RED}EXIT\nKeyboardInterrupt{COLOR_RESET}")
+    else:
+        print(f"{COLOR_YELLOW}STOPPED{COLOR_RESET}")
