@@ -16,8 +16,8 @@ AI_STREAM = False
 LUNA_PROMPT_FILE = "luna_prompt.txt"
 
 # Memory file path
-MEMORY_FILE = "memory.json"
-LONG_MEMORY_FILE = "long_memory.json"
+MEMORY_FILE = "memory/memory.json"
+LONG_MEMORY_FILE = "memory/long_memory.json"
 
 # Load knowledge file (from PDF or TXT)
 KNOWLEDGE_FILE = "user_knowledge.txt"
@@ -40,7 +40,7 @@ CONFIG_PATHS = {
 
 PIPER_MODEL_PATH = MODELS_PATHS[TTS_VOICE]
 PIPER_CONFIG_PATH = CONFIG_PATHS[TTS_VOICE]
-AUDIO_OUTPUT_FILE = "output.wav"
+AUDIO_OUTPUT_FILE = "audio/output.wav"
 
 
 def validate_tts_paths():

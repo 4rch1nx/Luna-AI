@@ -114,7 +114,7 @@ def extract_user_info(user_input):
 
 def log_request_response(prompt, response):
     timestamp = datetime.now()
-    date_str = timestamp.strftime("%Y-%m-%d")
+    date_str = timestamp.strftime("%d-%m-%Y")
     log_file = f"logs/{date_str}.log"
 
     os.makedirs("logs", exist_ok=True)
@@ -155,6 +155,15 @@ def remove_repeated_start(reply, threshold=0.7):
             if SequenceMatcher(None, first_line, old_reply).ratio() > threshold:
                 return '\n'.join(lines[1:]) or "(Hmm...)"
     return reply
+
+
+def clean_response(text):
+    """Remove unwanted formatting tags like <response>, </response>, etc."""
+    # Remove <response>...</response> blocks
+    text = re.sub(r"</?response[^>]*>", "", text, flags=re.IGNORECASE)
+    # Remove extra whitespace and newlines
+    text = re.sub(r"\n{3,}", "\n\n", text.strip())
+    return text.strip()
 
 
 def speak_text(text, speed=TTS_SPEED):
@@ -294,8 +303,7 @@ Respond to the latest message.
             )
 
             ai_reply = response.json().get("response", "No response")
-
-            # Avoid repetition
+            ai_reply = clean_response(ai_reply)
             ai_reply = remove_repeated_start(ai_reply)
 
             # Log request and response
