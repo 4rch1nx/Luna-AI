@@ -82,6 +82,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-tts", action="store_true", help="Disable TTS")
     parser.add_argument("--model", type=str, default=MODEL_NAME, help="Model name")
+    parser.add_argument("--wipe-memory", action="store_true", help="Wipes short memory file")
     return parser.parse_args()
 
 
@@ -327,6 +328,10 @@ def main():
     args = parse_args()
     if args.no_tts:
         TTS_ENABLED = False
+    elif args.wipe_memory:
+        open(MEMORY_FILE, 'w').close()
+        print(f"{COLOR_RED}Short memory file '{MEMORY_FILE}' wiped.{COLOR_RESET}")
+        exit(0)
 
     startup()
 
